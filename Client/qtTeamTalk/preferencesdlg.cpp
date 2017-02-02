@@ -30,6 +30,7 @@
 #include "customvideofmtdlg.h"
 #include "bearwarelogindlg.h"
 #include "settings.h"
+#include "ttseventsmodel.h"
 
 #include <QDebug>
 #include <QMessageBox>
@@ -169,6 +170,9 @@ PreferencesDlg::PreferencesDlg(SoundDevice& devin, SoundDevice& devout, QWidget 
             SLOT(slotEventMuteAllOn()));
     connect(ui.mutealloffButton, SIGNAL(clicked()),
             SLOT(slotEventMuteAllOff()));
+
+    //text to speech
+    ui.ttsListView->setModel(new TTSEventsModel(this));
 
     //keyboard shortcuts
     connect(ui.voiceactButton, SIGNAL(clicked(bool)), 
@@ -551,6 +555,8 @@ void PreferencesDlg::slotTabChange(int index)
         ui.voiceactoffEdit->setText(ttSettings->value(SETTINGS_SOUNDEVENT_VOICEACTOFF).toString());
         ui.muteallonEdit->setText(ttSettings->value(SETTINGS_SOUNDEVENT_MUTEALLON).toString());
         ui.mutealloffEdit->setText(ttSettings->value(SETTINGS_SOUNDEVENT_MUTEALLOFF).toString());
+        break;
+    case TTSEVENTS_TAB :
         break;
     case SHORTCUTS_TAB :  //shortcuts
     {
