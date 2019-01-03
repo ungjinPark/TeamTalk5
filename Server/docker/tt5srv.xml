@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<teamtalk version="5.1">
+    <general>
+        <server-name>TEAMTALK SERVER NAME</server-name>
+        <motd>MESSAGE OF THE DAY</motd>
+        <max-users>MAX ALLOWED USERS SERVER</max-users>
+        <auto-save>true</auto-save>
+        <tcpport>TCP_PORT_CUSTOM</tcpport>
+        <udpport>UDP_PORT_CUSTOM</udpport>
+        <login-attempts>10</login-attempts>
+        <max-logins-per-ipaddr>0</max-logins-per-ipaddr>
+    </general>
+    <file-storage>
+        <files-root>/var/teamtalk/files</files-root>
+        <max-diskusage>100000000000000000</max-diskusage>
+        <channel-diskquota>100000000000000000</channel-diskquota>
+    </file-storage>
+    <users>
+        <user>
+            <username>REPLACE THIS USERNAME</username>
+            <password>REPLACE THIS PASSWORD</password>
+            <user-type>2</user-type>
+            <user-rights>0</user-rights>
+            <note></note>
+            <userdata>0</userdata>
+            <init-channel></init-channel>
+            <audiocodec-bps-limit>0</audiocodec-bps-limit>
+            <abuse-prevention>
+                <commands-limit>0</commands-limit>
+                <commands-interval-msec>0</commands-interval-msec>
+            </abuse-prevention>
+            <channel-operator />
+        </user>
+    </users>
+</teamtalk>
