@@ -27,9 +27,6 @@ import AVFoundation
 
 class SoundInputsViewController : UITableViewController {
 
-    var soundtype_items  = [UITableViewCell]()
-    var soundinput_items = [UITableViewCell]()
-    
     override func viewDidLoad() {
         super.viewDidLoad()
     }
@@ -57,7 +54,7 @@ class SoundInputsViewController : UITableViewController {
         if let inputs = session.availableInputs {
             if section < inputs.count {
                 if let datasources = inputs[section].dataSources {
-                    return datasources.count
+                    return max(datasources.count, 1)
                 }
             }
         }
@@ -71,12 +68,39 @@ class SoundInputsViewController : UITableViewController {
         if let inputs = session.availableInputs {
             if indexPath.section < inputs.count {
                 if let datasources = inputs[indexPath.section].dataSources {
-                    cell!.textLabel?.text = datasources[indexPath.row].dataSourceName
+                    if (indexPath.row < datasources.count) {
+                        cell!.textLabel?.text = datasources[indexPath.row].dataSourceName
+                    }
+                    else {
+                        cell!.textLabel?.text = NSLocalizedString("Default", comment: "Sound Input")
+                    }
                 }
             }
         }
         return cell!
     }
 
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+
+        let session = AVAudioSession.sharedInstance()
+        
+        do {
+            if let inputs = session.availableInputs {
+                if indexPath.section < inputs.count {
+                    if let datasources = inputs[indexPath.section].dataSources {
+                        if (indexPath.row < datasources.count) {
+                            try session.setInputDataSource(datasources[indexPath.row])
+                        }
+                        else {
+                            try session.setPreferredInput(inputs[indexPath.section].)
+                        }
+                    }
+                }
+            }
+        }
+        catch {
+            print("Failed to select data source")
+        }
+    }
 }
 
