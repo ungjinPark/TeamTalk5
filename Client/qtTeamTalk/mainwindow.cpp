@@ -656,8 +656,6 @@ void MainWindow::loadSettings()
 
     if(connect_ok)
         QTimer::singleShot(0, this, SLOT(slotConnectToLatest()));
-
-     //TT_EnableAudioBlockEvent(ttInst, true);
 }
 
 bool MainWindow::parseArgs(const QStringList& args)
@@ -945,6 +943,9 @@ void MainWindow::processTTMessage(const TTMessage& msg)
             TT_SetUserMediaStorageDir(ttInst, msg.user.nUserID, _W(audiofolder), nullptr, aff);
 
         updateUserSubscription(msg.user.nUserID);
+
+        if (msg.user.nUserID != TT_GetMyUserID(ttInst))
+            TT_EnableAudioBlockEvent(ttInst, msg.user.nUserID,  STREAMTYPE_VOICE, true);
     }
     break;
     case CLIENTEVENT_CMD_USER_LOGGEDOUT :
@@ -1330,10 +1331,14 @@ void MainWindow::processTTMessage(const TTMessage& msg)
                 << "index" << block->uSampleIndex 
                 << "samples" << block->nSamples
                 << "avg" << mean;
+            TT_InsertAudioBlock(ttInst, block);
             TT_ReleaseUserAudioBlock(ttInst, block);
         }
     }
     break;
+    case CLIENTEVENT_AUDIOINPUT :
+        qDebug() << "Active audio input #" << msg.nSource << " " << msg.audioinputprogress.uElapsedMSec << " msec. Queue: " << msg.audioinputprogress.uQueueMSec;
+        break;
     case CLIENTEVENT_HOTKEY :
         Q_ASSERT(msg.ttType == __TTBOOL);
         hotkeyToggle((HotKeyID)msg.nSource, (bool)msg.bActive);
