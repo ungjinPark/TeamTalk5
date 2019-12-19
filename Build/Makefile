@@ -42,7 +42,7 @@ android-x86: teamtalk-env toolchain-env
 	. $(TOOLCHAIN_ROOT)/toolchain.sh android x86 && make TEAMTALK_ROOT=$(TEAMTALK_ROOT) TOOLCHAIN_FILE=$(TOOLCHAIN_ROOT)/toolchain-android-x86.cmake BUILDDIR=build-$@ android-build
 
 generic:
-	make CMAKE_EXTRA="-DBUILD_TEAMTALK_CORE=ON" buildlib
+	make CMAKE_EXTRA="-DBUILD_TEAMTALK_CORE=ON $(CMAKE_EXTRA)" buildlib
 
 deb32:
 	make BUILDDIR=build-$@ generic
@@ -135,4 +135,10 @@ xcodeswap-toolchain: toolchain-env
 teamtalk-jar:
 	make BUILDDIR=build-$@ CMAKE_EXTRA="-DBUILD_TEAMTALK_CLIENTS=OFF -DBUILD_TEAMTALKPRO_SERVERS=OFF -DBUILD_TEAMTALK_LIBRARY_JNI=OFF -DBUILD_TEAMTALKPRO_LIBRARY_JNI=OFF -DBUILD_TEAMTALK_LIBRARY_DOTNET=OFF -DBUILD_TEAMTALKPRO_LIBRARY_DOTNET=OFF -DBUILD_TEAMTALK_LIBRARY_DOTNET=OFF -DBUILD_TEAMTALKPRO_LIBRARY_DOTNET=OFF" buildlib
 
+ubuntu18-depend:
+	# TeamTalk 5 dependencies
+	apt install qt5-default libqt5x11extras5-dev qtwebengine5-dev qtmultimedia5-dev doxygen openjdk-11-jdk qttools5-dev-tools
 
+debian9-depend:
+	# TeamTalk 5 dependencies
+	apt install qt5-default qtbase5-dev libqt5x11extras5-dev qtmultimedia5-dev qtwebengine5-dev doxygen g++ openjdk-8-jdk qttools5-dev-tools

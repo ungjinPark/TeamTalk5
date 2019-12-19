@@ -65,8 +65,8 @@ std::shared_ptr<PortAudio> PortAudio::getInstance()
     static std::shared_ptr<PortAudio> p(new PortAudio());
 
 #if defined(ACE_WIN32) //COM must be initialize for all threads which uses this class
-    static ACE_Recursive_Thread_Mutex mtx;
-    wguard_t g(mtx);
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> g(mtx);
 
     static set<ACE_thread_t> com_threads;
     if(com_threads.find(ACE_Thread::self()) == com_threads.end())
@@ -151,7 +151,7 @@ bool PortAudio::GetDefaultDevices(int& inputdeviceid, int& outputdeviceid)
         }
     }
 #endif
-    return inputdeviceid != paNoDevice && outputdeviceid != paNoDevice;
+    return inputdeviceid != paNoDevice || outputdeviceid != paNoDevice;
 }
 
 bool PortAudio::GetDefaultDevices(SoundAPI sndsys, int& inputdeviceid,
@@ -364,6 +364,8 @@ void PortAudio::CloseStream(inputstreamer_t streamer)
 
     err = Pa_CloseStream(stream);
     assert(err == paNoError);
+
+    streamer->stream = nullptr;
 }
 
 int OutputStreamCallback(const void *inputBuffer, void *outputBuffer,
@@ -431,6 +433,8 @@ outputstreamer_t PortAudio::NewStream(StreamPlayer* player, int outputdeviceid,
     //set master volume so it's relative to master volume
     SetVolume(player, VOLUME_DEFAULT);
 
+    MYTRACE(ACE_TEXT("Created PortAudio output stream %p\n"), streamer->stream);
+
     return streamer;
 }
 
@@ -448,10 +452,12 @@ void PortAudio::CloseStream(outputstreamer_t streamer)
         err = Pa_AbortStream(paStream);
     assert(err == paNoError);
 
+    MYTRACE(ACE_TEXT("Closing PortAudio output stream %p\n"), streamer->stream);
     //close the stream
     err = Pa_CloseStream(paStream);
     assert(err == paNoError);
-
+    MYTRACE(ACE_TEXT("Closed PortAudio output stream %p\n"), streamer->stream);
+    streamer->stream = nullptr;
     MYTRACE_COND(err != paNoError, ACE_TEXT("PORTAUDIO: Failed to close stream\n"));
 }
 
@@ -648,6 +654,8 @@ void PortAudio::CloseStream(duplexstreamer_t streamer)
     PaStream* stream = streamer->stream;
     PaError err = Pa_CloseStream(streamer->stream);
     assert(err == paNoError);
+    
+    streamer->stream = nullptr;
 }
 
 } //namespace

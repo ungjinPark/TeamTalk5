@@ -386,7 +386,8 @@ namespace teamtalk {
         bool Connect(bool encrypted, const ACE_INET_Addr& hosttcpaddr,
                      const ACE_INET_Addr* localtcpaddr);
         void Disconnect();
-
+        ACE_INET_Addr GetLocalAddr();
+        
         //StreamListener
 #if defined(ENABLE_ENCRYPTION)
         void OnOpened(CryptStreamHandler::StreamHandler_t& handler);
@@ -601,7 +602,7 @@ namespace teamtalk {
         soundsystem::soundsystem_t m_soundsystem;
         //the reactor associated with this client instance
         ACE_Reactor m_reactor;
-        ClientFlags m_flags; //Mask of ClientFlag-enum
+        std::atomic<ClientFlags> m_flags; //Mask of ClientFlag-enum
         //set of timers currently in use. Protected by lock_timers().
         timer_handlers_t m_timers;
         ACE_Recursive_Thread_Mutex m_timers_lock; //mutexes must be the last to be destroyed

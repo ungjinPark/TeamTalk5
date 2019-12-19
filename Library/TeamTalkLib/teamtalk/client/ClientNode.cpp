@@ -433,6 +433,7 @@ void ClientNode::UpdateKeepAlive(const ClientKeepAlive& keepalive)
     // restart keep alive timer
     if (restartudp)
     {
+        TTASSERT(!TimerExists(TIMER_UDPKEEPALIVE_ID));
         StartTimer(TIMER_UDPKEEPALIVE_ID, 0, m_keepalive.udp_keepalive_interval,
                    m_keepalive.udp_keepalive_rtx);
     }
@@ -794,8 +795,7 @@ int ClientNode::Timer_UdpKeepAlive()
 {
     ASSERT_REACTOR_LOCKED(this);
 
-    assert(GetFlags() & (CLIENT_CONNECTED));
-
+    // try reconnecting on UDP
     if (ACE_Time_Value(m_clientstats.udp_silence_sec, 0) >= m_keepalive.udp_keepalive_interval * 2)
     {
         MYTRACE(ACE_TEXT("Recreating UDP socket due to connectivity problems\n"));
@@ -804,6 +804,7 @@ int ClientNode::Timer_UdpKeepAlive()
         if (TimerExists(TIMER_UDPCONNECT_ID))
             StopTimer(TIMER_UDPCONNECT_ID);
 
+        m_clientstats.udp_silence_sec = 0; // reset UDP timeout since we switch from keepalive to connect
         StartTimer(TIMER_UDPCONNECT_ID, 0, ACE_Time_Value::zero, m_keepalive.udp_connect_interval);
         
         return -1; // TIMER_UDPCONNECT_ID will take over
@@ -978,12 +979,14 @@ void ClientNode::RecreateUdpSocket()
 
     //recreate the UDP socket which has the server connection
     m_packethandler.close();
-    m_packethandler.open(m_localUdpAddr, UDP_SOCKET_RECV_BUF_SIZE, 
-                         UDP_SOCKET_SEND_BUF_SIZE);
+    auto localaddr = GetLocalAddr();
+    m_packethandler.open(localaddr, UDP_SOCKET_RECV_BUF_SIZE, UDP_SOCKET_SEND_BUF_SIZE);
 }
 
 void ClientNode::OpenAudioCapture(const AudioCodec& codec)
 {
+    ASSERT_REACTOR_LOCKED(this);
+
     int codec_samplerate = GetAudioCodecSampleRate(codec);
     int codec_samples = GetAudioCodecCbSamples(codec);
     int codec_channels = GetAudioCodecChannels(codec);
@@ -1096,6 +1099,7 @@ void ClientNode::CloseAudioCapture()
     m_playback_buffer.clear();
 }
 
+// Separate thread
 void ClientNode::QueueAudioFrame(const media::AudioFrame& audframe)
 {
     TTASSERT(audframe.userdata == STREAMTYPE_VOICE);
@@ -1113,11 +1117,13 @@ void ClientNode::QueueAudioFrame(const media::AudioFrame& audframe)
 
         m_soundprop.samples_transmitted += audframe.input_samples;
     }
-    else if(m_flags & CLIENT_MUX_AUDIOFILE)
+    else if (m_flags & CLIENT_MUX_AUDIOFILE)
+    {
         audiomuxer().QueueUserAudio(MUX_MYSELF_USERID, NULL, 
                                     m_soundprop.samples_transmitted, true,
                                     0, 0);
-
+    }
+    
     if(AUDIOCONTAINER::instance()->AddAudio(m_soundprop.soundgroupid,
                                             0, STREAMTYPE_VOICE,
                                             m_voice_stream_id, 
@@ -1599,7 +1605,8 @@ void ClientNode::ReceivedPacket(PacketHandler* ph,
     m_clientstats.udpbytes_recv += packet_size;
 
     MYTRACE_COND(m_serverinfo.udpaddr != addr, 
-                 ACE_TEXT("Received packet not from server\n"));
+                 ACE_TEXT("Received packet not from server: Was %s != %s\n"),
+                 InetAddrToString(addr).c_str(), InetAddrToString(m_serverinfo.udpaddr).c_str());
 
     if(m_serverinfo.udpaddr != addr)
         return;
@@ -1922,11 +1929,14 @@ void ClientNode::ReceivedHelloAckPacket(const HelloPacket& packet,
 
         m_clientstats.udpping_time = GETTIMESTAMP() - packet.GetTime();
         m_clientstats.udp_ping_dirty = false;
+        m_clientstats.udp_silence_sec = 0;
 
         m_serverinfo.packetprotocol = packet.GetProtocol();
 
         if(TimerExists(TIMER_UDPCONNECT_ID))
             StopTimer(TIMER_UDPCONNECT_ID);
+
+        TTASSERT(!TimerExists(TIMER_UDPKEEPALIVE_ID));
 
         StartTimer(TIMER_UDPKEEPALIVE_ID, 0, m_keepalive.udp_keepalive_interval,
                    m_keepalive.udp_keepalive_rtx);
@@ -1939,6 +1949,9 @@ void ClientNode::ReceivedHelloAckPacket(const HelloPacket& packet,
     {
         if(TimerExists(TIMER_UDPCONNECT_ID))
             StopTimer(TIMER_UDPCONNECT_ID);
+
+        // reset UDP silence period
+        m_clientstats.udp_silence_sec = 0;
 
         // Hello packet might come from recreated UDP connection
         if (!TimerExists(TIMER_UDPKEEPALIVE_ID))
@@ -2234,6 +2247,15 @@ void ClientNode::SendPackets()
     int ret;
     while( (p = m_tx_queue.GetNextPacket()) )
     {
+        // encoders in separate threads calls ACE_Reactor::notify() to
+        // trigger send but they don't check if connection has been
+        // dropped.
+        MYTRACE_COND(!m_def_stream && !m_crypt_stream,
+                     ACE_TEXT("Cannot send packet type %d on closed connection.\n"), int(p->GetKind()));
+
+        if (!m_def_stream && !m_crypt_stream)
+            continue;
+        
         switch(p->GetKind())
         {
         case PACKET_KIND_VOICE :
@@ -3907,6 +3929,8 @@ void ClientNode::Disconnect()
 
     ASSERT_NOT_REACTOR_THREAD(m_reactor);
 
+    MYTRACE(ACE_TEXT("Disconnecting #%d.\n"), GetUserID());
+
     while(m_timers.size())
     {
         m_reactor.cancel_timer(m_timers.begin()->second, 0);
@@ -3966,6 +3990,8 @@ void ClientNode::Disconnect()
     m_serverinfo = ServerInfo();
     m_clientstats = ClientStats();
     m_localTcpAddr = m_localUdpAddr = ACE_INET_Addr();
+
+    MYTRACE(ACE_TEXT("Disconnected #%d.\n"), GetUserID());
 }
 
 void ClientNode::JoinChannel(clientchannel_t& chan)
@@ -4657,10 +4683,8 @@ int ClientNode::TransmitCommand(const ACE_TString& command, int cmdid)
     return cmdid?cmdid:1;
 }
 
-void ClientNode::OnOpened()
+ACE_INET_Addr ClientNode::GetLocalAddr()
 {
-    MYTRACE( ACE_TEXT("Connected successfully on TCP\n") );
-
     ACE_INET_Addr localaddr;
     if (m_localUdpAddr == ACE_INET_Addr())
     {
@@ -4680,7 +4704,17 @@ void ClientNode::OnOpened()
         }
     }
     else
+    {
         localaddr = m_localUdpAddr;
+    }
+    return localaddr;
+}
+
+void ClientNode::OnOpened()
+{
+    MYTRACE( ACE_TEXT("Connected successfully on TCP\n") );
+
+    ACE_INET_Addr localaddr = GetLocalAddr();
     
     MYTRACE(ACE_TEXT("UDP bind: %s. %d\n"), InetAddrToString(localaddr).c_str(), localaddr.get_type());
 
@@ -4919,6 +4953,7 @@ void ClientNode::HandleWelcome(const mstrings_t& properties)
                    m_keepalive.tcp_keepalive_interval);
 
         //start connecting on UDP to server. DoLogin() may not be called before UDP connect succeeds
+        m_clientstats.udp_silence_sec = 0; // reset UDP timeout, since we're restarting a connection
         StartTimer(TIMER_UDPCONNECT_ID, 0, ACE_Time_Value::zero, m_keepalive.udp_connect_interval);
 
         //now wait for UDP timer to complete connection

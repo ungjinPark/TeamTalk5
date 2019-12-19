@@ -69,16 +69,29 @@ bool OpenSLESWrapper::Init()
 
     // create engine
     result = slCreateEngine(&m_engineObject, 1, engineOption, n_ids, ids, req);
-    assert(SL_RESULT_SUCCESS == result);
+    MYTRACE_COND(SL_RESULT_SUCCESS != result,
+                 ACE_TEXT("Failed to create OpenSL ES engine object\n"));
+    if (SL_RESULT_SUCCESS != result)
+        return false;
 
     // realize the engine
     result = (*m_engineObject)->Realize(m_engineObject, SL_BOOLEAN_FALSE);
-    assert(SL_RESULT_SUCCESS == result);
+    MYTRACE_COND(SL_RESULT_SUCCESS != result,
+                 ACE_TEXT("Failed to realize OpenSL ES engine object\n"));
+    if (SL_RESULT_SUCCESS != result)
+        return false;
 
     // get the engine interface, which is needed in order to create other objects
     result = (*m_engineObject)->GetInterface(m_engineObject, SL_IID_ENGINE, &m_engineEngine);
-    assert(SL_RESULT_SUCCESS == result);
+    MYTRACE_COND(SL_RESULT_SUCCESS != result,
+                 ACE_TEXT("Failed to get OpenSL ES engine interface\n"));
+    if (SL_RESULT_SUCCESS != result)
+        return false;
 
+    // reinitialize sound groups so they can use the new m_engineEngine
+    std::vector<soundgroup_t> grps = GetSoundGroups();
+    for (auto sndgrp : grps)
+        InitOutputMixObject(sndgrp);
 
     // go through effect capabilities interfaces
     SLAndroidEffectCapabilitiesItf effectLibItf;
@@ -142,6 +155,10 @@ void OpenSLESWrapper::Close()
 {
     if(m_engineObject)
     {
+        std::vector<soundgroup_t> grps = GetSoundGroups();
+        for (auto sndgrp : grps)
+            CloseOutputMixObject(sndgrp);
+        
         (*m_engineObject)->Destroy(m_engineObject);
         m_engineObject = NULL;
         m_engineEngine = NULL;
@@ -156,10 +173,22 @@ std::shared_ptr<OpenSLESWrapper> OpenSLESWrapper::getInstance()
     return p;
 }
 
-soundgroup_t OpenSLESWrapper::NewSoundGroup()
+SLObjectItf OpenSLESWrapper::InitOutputMixObject(soundgroup_t& sndgrp)
 {
+    std::lock_guard<std::recursive_mutex> g(sndgrp->mutex);
+    
+    assert(sndgrp->refCount >= 0);
+    if (sndgrp->refCount >= 1)
+    {
+        sndgrp->refCount++;
+        assert(sndgrp->outputMixObject);
+        MYTRACE("Updated output mix object %p, ref count: %d\n", sndgrp->outputMixObject, sndgrp->refCount);
+        return sndgrp->outputMixObject;
+    }
+
     SLresult result;
     SLObjectItf outputMixObject;
+    assert(m_engineEngine);
 
     // create output mix, with environmental reverb specified as a non-required interface
     const SLInterfaceID ids_env[1] = {SL_IID_ENVIRONMENTALREVERB};
@@ -168,7 +197,9 @@ soundgroup_t OpenSLESWrapper::NewSoundGroup()
                                                 1, ids_env, req_env);
     MYTRACE_COND(SL_RESULT_SUCCESS != result, ACE_TEXT("Failed to create OpenSLES output mux\n"));
     if(SL_RESULT_SUCCESS != result)
-        return soundgroup_t();
+    {
+        return nullptr;
+    }
 
     // realize the output mix
     result = (*outputMixObject)->Realize(outputMixObject, SL_BOOLEAN_FALSE);
@@ -176,21 +207,52 @@ soundgroup_t OpenSLESWrapper::NewSoundGroup()
     if(SL_RESULT_SUCCESS != result)
     {
         (*outputMixObject)->Destroy(outputMixObject);
-        return soundgroup_t();
+        return nullptr;
     }
 
-    soundgroup_t sg(new SLSoundGroup());
-    sg->outputMixObject = outputMixObject;
+    // output mix object created successfully
+    sndgrp->refCount = 1;
+    sndgrp->outputMixObject = outputMixObject;
+    
+    MYTRACE("Create output mix object %p, ref count: %d\n", outputMixObject, sndgrp->refCount);
+    return sndgrp->outputMixObject;
+}
 
+void OpenSLESWrapper::CloseOutputMixObject(soundgroup_t& sndgrp)
+{
+    std::lock_guard<std::recursive_mutex> g(sndgrp->mutex);
+
+    if (!sndgrp->outputMixObject)
+    {
+        MYTRACE("Ignored close on output mix object. It was never created.\n");
+        return;
+    }
+    
+    sndgrp->refCount--;
+    assert(sndgrp->refCount >= 0);
+
+    MYTRACE("Output mix object %p decremented: %d\n", sndgrp->outputMixObject, sndgrp->refCount);
+    
+    if (sndgrp->refCount > 0)
+        return;
+    
+    MYTRACE("Removing output mix object %p\n", sndgrp->outputMixObject);
+    (*sndgrp->outputMixObject)->Destroy(sndgrp->outputMixObject);
+    sndgrp->outputMixObject = nullptr;
+}
+
+soundgroup_t OpenSLESWrapper::NewSoundGroup()
+{
+    soundgroup_t sg(new SLSoundGroup());
+    InitOutputMixObject(sg);
     return sg;
 }
 
 void OpenSLESWrapper::RemoveSoundGroup(soundgroup_t grp)
 {
-    if(grp->outputMixObject)
-    {
-        (*grp->outputMixObject)->Destroy(grp->outputMixObject);
-    }
+    assert(grp);
+    CloseOutputMixObject(grp);
+    assert(!grp->outputMixObject);
 }
 
 bool OpenSLESWrapper::GetDefaultDevices(int& inputdeviceid,
@@ -219,10 +281,12 @@ void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
     SLInputStreamer* streamer = static_cast<SLInputStreamer*>(context);
     SLAndroidSimpleBufferQueueState state;
 
-    wguard_t g(streamer->mutex);
+    std::lock_guard<std::recursive_mutex> g(streamer->mutex);
     
     SLresult result = (*bq)->GetState(bq, &state);
     assert(result == SL_RESULT_SUCCESS);
+    if (result != SL_RESULT_SUCCESS)
+        return;
 
     ACE_UINT32 buf_index = streamer->buf_index++ % ANDROID_INPUT_BUFFERS;
     assert(streamer->channels);
@@ -274,8 +338,11 @@ inputstreamer_t OpenSLESWrapper::NewStream(StreamCapture* capture,
 
     // create audio recorder
     // (requires the RECORD_AUDIO permission)
-    SLObjectItf recorderObject = NULL;
-    SLRecordItf recorderRecord = NULL;
+    SLObjectItf recorderObject = nullptr;
+    SLRecordItf recorderRecord = nullptr;
+    SLAndroidSimpleBufferQueueItf recorderBufferQueue = nullptr;
+    inputstreamer_t streamer;
+    int frames_per_callback = 0;
 
     const SLInterfaceID id[1] = {SL_IID_ANDROIDSIMPLEBUFFERQUEUE};
     const SLboolean req[1] = {SL_BOOLEAN_TRUE};
@@ -292,28 +359,31 @@ inputstreamer_t OpenSLESWrapper::NewStream(StreamCapture* capture,
     result = (*recorderObject)->Realize(recorderObject, SL_BOOLEAN_FALSE);
     if (SL_RESULT_SUCCESS != result) {
         MYTRACE(ACE_TEXT("Failed to realize OpenSL audio recorder\n"));
-        return inputstreamer_t();
+        goto failure;
     }
 
     // get the record interface
     result = (*recorderObject)->GetInterface(recorderObject, SL_IID_RECORD, 
                                              &recorderRecord);
     assert(SL_RESULT_SUCCESS == result);
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
     // get the buffer queue interface
-    SLAndroidSimpleBufferQueueItf recorderBufferQueue = NULL;
     result = (*recorderObject)->GetInterface(recorderObject, SL_IID_ANDROIDSIMPLEBUFFERQUEUE,
                                              &recorderBufferQueue);
     assert(SL_RESULT_SUCCESS == result);
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
     // store input stream properties for callback
-    inputstreamer_t streamer(new SLInputStreamer(capture,
-                                                 sndgrpid,
-                                                 framesize,
-                                                 samplerate,
-                                                 channels,
-                                                 SOUND_API_OPENSLES_ANDROID,
-                                                 inputdeviceid));
+    streamer.reset(new SLInputStreamer(capture,
+                                       sndgrpid,
+                                       framesize,
+                                       samplerate,
+                                       channels,
+                                       SOUND_API_OPENSLES_ANDROID,
+                                       inputdeviceid));
 
     streamer->recorderObject = recorderObject;
     streamer->recorderRecord = recorderRecord;
@@ -324,18 +394,20 @@ inputstreamer_t OpenSLESWrapper::NewStream(StreamCapture* capture,
                                                       bqRecorderCallback,
                                                       streamer.get());
     assert(SL_RESULT_SUCCESS == result);
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
     //figure out how many 'framesize' we need in each callback
-    int frames_per_callback = detectMinumumBuffer(recorderBufferQueue,
-                                                  streamer->buffers[0],
-                                                  samplerate, framesize, 
-                                                  channels);
-    if(frames_per_callback == 0)
+    frames_per_callback = detectMinumumBuffer(recorderBufferQueue,
+                                              streamer->buffers[0],
+                                              samplerate, framesize, 
+                                              channels);
+    if (frames_per_callback == 0)
         goto failure;
 
     MYTRACE(ACE_TEXT("Minimum samples for recording is %d\n"), frames_per_callback * framesize);
     
-    for(size_t i=1;i<ANDROID_INPUT_BUFFERS;i++)
+    for (size_t i=1;i<ANDROID_INPUT_BUFFERS;i++)
     {
         streamer->buffers[i].resize(frames_per_callback*framesize*channels);
         // enqueue an empty buffer to be filled by the recorder
@@ -395,7 +467,7 @@ void OpenSLESWrapper::CloseStream(inputstreamer_t streamer)
     {
         //wait for recorder callback to complete, otherwise OpenSLES
         //may hang
-        wguard_t g(streamer->mutex);
+        std::lock_guard<std::recursive_mutex> g(streamer->mutex);
     }
 
     result = (*streamer->recorderBufferQueue)->Clear(streamer->recorderBufferQueue);
@@ -413,7 +485,7 @@ void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 
     SLOutputStreamer* streamer = static_cast<SLOutputStreamer*>(context);
     bool more = true;
-    wguard_t g(streamer->mutex);
+    std::lock_guard<std::recursive_mutex> g(streamer->mutex);
 
     ACE_UINT32 buf_index = streamer->buf_index++ % ANDROID_OUTPUT_BUFFERS;
     assert(streamer->channels);
@@ -435,7 +507,7 @@ void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
                             streamer->buffers[buf_index].size()*sizeof(short));
     assert(SL_RESULT_SUCCESS == result);
 
-    if(!more)
+    if (!more)
     {
         SLPlayItf playerPlay = streamer->playerPlay;
 
@@ -463,6 +535,7 @@ outputstreamer_t OpenSLESWrapper::NewStream(soundsystem::StreamPlayer* player,
     SLuint32 sl_samplerate = toSLSamplerate(samplerate);
     if(!sl_samplerate)
         return outputstreamer_t();
+    
     SLuint32 sl_speaker = toSLSpeaker(channels);
 
     SLDataFormat_PCM format_pcm = {SL_DATAFORMAT_PCM, (SLuint32)channels, sl_samplerate,
@@ -470,15 +543,22 @@ outputstreamer_t OpenSLESWrapper::NewStream(soundsystem::StreamPlayer* player,
                                    sl_speaker, SL_BYTEORDER_LITTLEENDIAN};
     SLDataSource audioSrc = {&loc_bufq, &format_pcm};
 
-
-    SLObjectItf outputMixObject = sg->outputMixObject;
+    SLObjectItf outputMixObject = InitOutputMixObject(sg);
+    if (!outputMixObject)
+    {
+        MYTRACE(ACE_TEXT("Failed to create OpenSL ES output mix\n"));
+        return outputstreamer_t();
+    }
 
     // configure audio sink
     SLDataLocator_OutputMix loc_outmix = {SL_DATALOCATOR_OUTPUTMIX, outputMixObject};
     SLDataSink audioSnk = {&loc_outmix, NULL};
 
-    SLObjectItf playerObject = NULL;
-    SLPlayItf playerPlay = NULL;
+    SLObjectItf playerObject = nullptr;
+    SLPlayItf playerPlay = nullptr;
+    SLAndroidSimpleBufferQueueItf playerBufferQueue = nullptr;
+    outputstreamer_t streamer;
+    int frames_per_callback = 0;
 
     // create audio player
     const SLInterfaceID ids[3] = {SL_IID_BUFFERQUEUE, SL_IID_EFFECTSEND,
@@ -488,28 +568,41 @@ outputstreamer_t OpenSLESWrapper::NewStream(soundsystem::StreamPlayer* player,
     result = (*m_engineEngine)->CreateAudioPlayer(m_engineEngine, &playerObject, 
                                                   &audioSrc, &audioSnk,
                                                   3, ids, req);
-    assert(SL_RESULT_SUCCESS == result);
+    MYTRACE_COND(SL_RESULT_SUCCESS != result,
+                 ACE_TEXT("Failed to create OpenSL ES player object\n"));
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
     // realize the player
     result = (*playerObject)->Realize(playerObject, SL_BOOLEAN_FALSE);
-    assert(SL_RESULT_SUCCESS == result);
+    MYTRACE_COND(SL_RESULT_SUCCESS != result,
+                 ACE_TEXT("Failed to realize OpenSL ES player object\n"));
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
     // get the play interface
     result = (*playerObject)->GetInterface(playerObject, SL_IID_PLAY, &playerPlay);
+    MYTRACE_COND(SL_RESULT_SUCCESS != result,
+                 ACE_TEXT("Failed to get OpenSL ES play interface\n"));
     assert(SL_RESULT_SUCCESS == result);
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
     // get the buffer queue interface
-    SLAndroidSimpleBufferQueueItf playerBufferQueue = NULL;
     result = (*playerObject)->GetInterface(playerObject, 
                                            SL_IID_BUFFERQUEUE,
                                            &playerBufferQueue);
+    MYTRACE_COND(SL_RESULT_SUCCESS != result,
+                 ACE_TEXT("Failed to get OpenSL ES buffer interface\n"));
     assert(SL_RESULT_SUCCESS == result);
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
-    outputstreamer_t streamer(new SLOutputStreamer(player, sndgrpid, 
-                                                   framesize, samplerate,
-                                                   channels, 
-                                                   SOUND_API_OPENSLES_ANDROID,
-                                                   outputdeviceid));
+    streamer.reset(new SLOutputStreamer(player, sndgrpid, 
+                                        framesize, samplerate,
+                                        channels, 
+                                        SOUND_API_OPENSLES_ANDROID,
+                                        outputdeviceid));
   
     streamer->playerObject = playerObject;
     streamer->playerPlay = playerPlay;
@@ -520,18 +613,21 @@ outputstreamer_t OpenSLESWrapper::NewStream(soundsystem::StreamPlayer* player,
                                                     bqPlayerCallback,
                                                     streamer.get());
     assert(SL_RESULT_SUCCESS == result);
+    if (result != SL_RESULT_SUCCESS)
+        goto failure;
 
     //figure out how many 'framesize' we need in each callback
-    int frames_per_callback = detectMinumumBuffer(playerBufferQueue,
-                                                  streamer->buffers[0],
-                                                  samplerate, framesize, 
-                                                  channels);
+    frames_per_callback = detectMinumumBuffer(playerBufferQueue,
+                                              streamer->buffers[0],
+                                              samplerate, framesize, 
+                                              channels);
+    
     MYTRACE(ACE_TEXT("Minimum samples for playback is %d\n"), frames_per_callback * framesize);
 
     if(frames_per_callback == 0)
         goto failure;
     
-    for(size_t i=1;i<ANDROID_OUTPUT_BUFFERS;i++)
+    for (size_t i=1;i<ANDROID_OUTPUT_BUFFERS;i++)
     {
         streamer->buffers[i].resize(frames_per_callback*framesize*channels);
         // here we only enqueue one buffer because it is a long clip,
@@ -565,8 +661,12 @@ outputstreamer_t OpenSLESWrapper::NewStream(soundsystem::StreamPlayer* player,
     return streamer;
 
 failure:
+    
     if(playerObject)
         (*playerObject)->Destroy(playerObject);
+
+    if (outputMixObject)
+        CloseOutputMixObject(sg);
 
     return outputstreamer_t();
 }
@@ -576,6 +676,11 @@ void OpenSLESWrapper::CloseStream(outputstreamer_t streamer)
     StopStream(streamer);
 
     (*streamer->playerObject)->Destroy(streamer->playerObject);
+
+    soundgroup_t sg = GetSoundGroup(streamer->sndgrpid);
+    assert(sg);
+    assert(sg->outputMixObject);
+    CloseOutputMixObject(sg);
 }
 
 bool OpenSLESWrapper::StartStream(outputstreamer_t streamer)
@@ -604,7 +709,7 @@ bool OpenSLESWrapper::StopStream(outputstreamer_t streamer)
     assert(SL_RESULT_SUCCESS == result);
 
     //wait for player callback to complete
-    wguard_t g2(streamer->mutex);
+    std::lock_guard<std::recursive_mutex> g2(streamer->mutex);
 
     return SL_RESULT_SUCCESS == result;
 }
@@ -631,6 +736,8 @@ void OpenSLESWrapper::FillDevices(sounddevices_t& sounddevs)
     dev.soundsystem = SOUND_API_OPENSLES_ANDROID;
     dev.id = DEFAULT_DEVICE_ID;
 
+    assert(m_engineEngine);
+    
     for(size_t sr=0;sr<standardSampleRates.size();sr++)
     {
         for(int c=1;c<=2;c++)
@@ -688,12 +795,10 @@ void OpenSLESWrapper::FillDevices(sounddevices_t& sounddevs)
         }
     }
 
-    soundgroup_t sg = NewSoundGroup();
-    if (!sg)
-        return;
+    soundgroup_t sg(new SLSoundGroup());
 
-    SLObjectItf outputMixObject = sg->outputMixObject;
-    for(size_t sr=0;sr<standardSampleRates.size();sr++)
+    SLObjectItf outputMixObject = InitOutputMixObject(sg);
+    for(size_t sr=0;sr<standardSampleRates.size() && outputMixObject;sr++)
     {
         for(int c=1;c<=2;c++)
         {
@@ -775,7 +880,8 @@ void OpenSLESWrapper::FillDevices(sounddevices_t& sounddevs)
     
     sounddevs[shareddev.id] = shareddev;
 
-    RemoveSoundGroup(sg);
+    if (outputMixObject)
+        CloseOutputMixObject(sg);
 }
 
 SLuint32 toSLSamplerate(int samplerate)

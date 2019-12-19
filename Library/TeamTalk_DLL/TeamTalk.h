@@ -16,7 +16,7 @@
  * client's version can be seen in the @a szVersion member of the
  * #User-struct. */
 
-#define TEAMTALK_VERSION "5.5.0.4980"
+#define TEAMTALK_VERSION "5.5.0.4982"
 
 
 #if defined(WIN32)
@@ -2249,26 +2249,38 @@ extern "C" {
          * This timeout applies to both the TCP and UDP
          * connection. I.e. @c nTcpServerSilenceSec or @c
          * nUdpServerSilenceSec in #ClientStatistics should not exceed
-         * this value.  */
+         * @c nConnectionLostMSec. */
         INT32 nConnectionLostMSec;
-        /** @brief Client instance's interval between TT_DoPing()
-         * command. Read-only value. Will be half of
-         * #ServerProperties' @c nUserTimeout.
-         */
+        /** @brief Client instance's interval between automatically
+         * doing TT_DoPing() command. Read-only value. Will be half of
+         * #ServerProperties' @c nUserTimeout. */
         INT32 nTcpKeepAliveIntervalMSec;
         /** @brief Client instance's interval between sending UDP keep
-         * alive packets. This value must be less than @c
-         * nConnectionLostMSec. */
+         * alive packets. The UDP keep alive packets are used to
+         * ensure audio, video and desktop streams can be sent from
+         * the server to the client immediately. This value must be
+         * less than @c nConnectionLostMSec. */
         INT32 nUdpKeepAliveIntervalMSec;
         /** @brief Client instance's interval for retransmitting UDP
-         * keep alive packets. */
+         * keep alive packets. If server hasn't responded to UDP keep
+         * alive sent at interval @c nUdpKeepAliveIntervalMSec then a
+         * new UDP keep alive will be sent at the rate specified by
+         * @c nUdpKeepAliveRTXMSec. */
         INT32 nUdpKeepAliveRTXMSec;
         /** @brief Client instance's interval for retransmitting UDP
          * connect packets. UDP connect packets are only sent when
-         * TT_Connect() is initially called. */
+         * TT_Connect() is initially called. If the server doesn't
+         * respond to the client instance's initial UDP connect then a
+         * retransmission will be started at the rate of @c
+         * nUdpConnectRTXMSec. */
         INT32 nUdpConnectRTXMSec;
-        /** @brief The duration before the #TTInstance should give up
-         * trying to connect to the server. */
+        /** @brief The duration before the client instance should give
+         * up trying to connect to the server on UDP. When
+         * TT_Connect() manages to connect to the server's TCP port
+         * then the client will afterwards try to connect on server's
+         * UDP port. If the client cannot connect on UDP before the
+         * time specified by @c nUdpConnectTimeoutMSec then the client
+         * instance will report #CLIENTEVENT_CON_FAILED. */
         INT32 nUdpConnectTimeoutMSec;
     } ClientKeepAlive;
     
@@ -3138,6 +3150,18 @@ extern "C" {
          CLIENTEVENT_LOCAL_MEDIAFILE = CLIENTEVENT_NONE + 1070,
 
         /**
+         * @brief Progress is audio being injected as
+         * #STREAMTYPE_VOICE.
+         *
+         * @c nStreamID of #AudioInputProgress is the stream ID
+         * provided in the #AudioBlock when calling
+         * TT_InsertAudioBlock().
+         *
+         * When @c uElapsedMSec and @c uQueueMSec of
+         * #AudioInputProgress are zero then the stream ID (session)
+         * has ended. An audio input session has ended when an empty
+         * #AudioBlock has been inserted using TT_InsertAudioBlock().
+         *
          * @param nSource Stream ID used for sending audio input.
          * The stream ID will appear in #AudioBlock's @c nStreamID
          * on the receiving side.

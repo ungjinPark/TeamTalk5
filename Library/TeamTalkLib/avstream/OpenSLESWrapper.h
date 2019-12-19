@@ -32,6 +32,7 @@
 #include <map>
 #include <vector>
 #include <set>
+#include <mutex>
 
 #define ANDROID_INPUT_BUFFERS 3
 #define ANDROID_OUTPUT_BUFFERS 3
@@ -43,7 +44,7 @@ namespace soundsystem {
         SLObjectItf recorderObject;
         SLRecordItf recorderRecord;
         SLAndroidSimpleBufferQueueItf recorderBufferQueue;
-        ACE_Recursive_Thread_Mutex mutex;
+        std::recursive_mutex mutex;
 
         std::vector<short> buffers[ANDROID_INPUT_BUFFERS];
         ACE_UINT32 buf_index;
@@ -59,7 +60,7 @@ namespace soundsystem {
         SLObjectItf playerObject;
         SLPlayItf playerPlay;
         SLAndroidSimpleBufferQueueItf playerBufferQueue;
-        ACE_Recursive_Thread_Mutex mutex;
+        std::recursive_mutex mutex;
 
         std::vector<short> buffers[ANDROID_OUTPUT_BUFFERS];
         ACE_UINT32 buf_index;
@@ -73,8 +74,11 @@ namespace soundsystem {
 
     struct SLSoundGroup : SoundGroup
     {
-        SLObjectItf outputMixObject;
-        SLSoundGroup() : outputMixObject(NULL) { }
+        SLObjectItf outputMixObject = nullptr;
+        std::recursive_mutex mutex;
+        int refCount = 0;
+        SLSoundGroup() { }
+        ~SLSoundGroup() { assert(!outputMixObject); assert(refCount == 0);}
     };
 
     typedef SoundSystemBase< SLSoundGroup, SLInputStreamer, SLOutputStreamer, DuplexStreamer > SSB;
@@ -138,6 +142,9 @@ namespace soundsystem {
                                int& outputdeviceid);
         
     private:
+
+        SLObjectItf InitOutputMixObject(soundgroup_t& sndgrp);
+        void CloseOutputMixObject(soundgroup_t& sndgrp);
 
         // engine interfaces
         SLObjectItf m_engineObject;

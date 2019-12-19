@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2005-2018, BearWare.dk
- * 
+ *
  * Contact Information:
  *
  * Bjoern D. Rasmussen
@@ -109,11 +109,11 @@ bool AudioMuxer::StartThread(const ACE_TString& filename,
 
     if(this->activate() < 0)
         goto error;
-    
-    if(m_reactor.schedule_timer(this, 0, 
-                                ACE_Time_Value(MUX_INTERVAL_MSEC/1000, 
-                                               (MUX_INTERVAL_MSEC % 1000) * 1000), 
-                                ACE_Time_Value(MUX_INTERVAL_MSEC/1000, 
+
+    if(m_reactor.schedule_timer(this, 0,
+                                ACE_Time_Value(MUX_INTERVAL_MSEC/1000,
+                                               (MUX_INTERVAL_MSEC % 1000) * 1000),
+                                ACE_Time_Value(MUX_INTERVAL_MSEC/1000,
                                                (MUX_INTERVAL_MSEC % 1000) * 1000))<0)
         goto error;
 
@@ -135,7 +135,7 @@ void AudioMuxer::StopThread()
         this->wait();
         m_reactor.reset_reactor_event_loop();
         //flush remaining data
-        ProcessAudioQueues();
+        ProcessAudioQueues(true);
     }
 
     // write a silence block as the ending.
@@ -159,11 +159,11 @@ void AudioMuxer::StopThread()
         m_speexfile.reset();
     }
 #endif
-    
+
     if(m_wavefile)
         m_wavefile->Close();
     m_wavefile.reset();
-    
+
 #if defined(ENABLE_MEDIAFOUNDATION)
     m_mp3encoder.reset();
 #endif
@@ -182,7 +182,7 @@ void AudioMuxer::QueueUserAudio(int userid, const short* rawAudio,
                    GetAudioCodecChannels(codec));
 }
 
-void AudioMuxer::QueueUserAudio(int userid, const short* rawAudio, 
+void AudioMuxer::QueueUserAudio(int userid, const short* rawAudio,
                                 ACE_UINT32 sample_no, bool last,
                                 int n_samples, int n_channels)
 {
@@ -243,7 +243,7 @@ void AudioMuxer::QueueUserAudio(int userid, const short* rawAudio,
     ACE_Time_Value tm;
     if(q->enqueue(mb, &tm)<0)
     {
-        MYTRACE(ACE_TEXT("Buffer depleted for user #%d AudioMuxBlock %u, is last: %s. Dropped %u bytes\n"), 
+        MYTRACE(ACE_TEXT("Buffer depleted for user #%d AudioMuxBlock %u, is last: %s. Dropped %u bytes\n"),
                 userid, sample_no, (last? ACE_TEXT("true"):ACE_TEXT("false")), (unsigned)q->message_bytes());
         q->flush();
         //insert after flush, so it will appear as a new stream
@@ -256,7 +256,6 @@ void AudioMuxer::QueueUserAudio(int userid, const short* rawAudio,
         m_user_queue.erase(userid);
     }
 
-    // MYTRACE(ACE_TEXT("Queued %d\n"), userid);
 }
 
 int AudioMuxer::svc(void)
@@ -270,12 +269,12 @@ int AudioMuxer::svc(void)
 
 int AudioMuxer::handle_timeout(const ACE_Time_Value &current_time, const void *act/*=0*/)
 {
-    ProcessAudioQueues();
+    ProcessAudioQueues(false);
 
     return 0;
 }
 
-void AudioMuxer::ProcessAudioQueues()
+void AudioMuxer::ProcessAudioQueues(bool flush)
 {
     //Make map of userid -> sample no.
     //Check if all expected audio is there (from every user)
@@ -317,6 +316,18 @@ void AudioMuxer::ProcessAudioQueues()
         cb_count--;
     }
 
+    if (flush)
+    {
+        RemoveEmptyMuxUsers();
+
+        while (CanMuxUserAudio())
+        {
+            MuxUserAudio();
+            WriteAudioToFile(cb_samples);
+            RemoveEmptyMuxUsers();
+        }
+    }
+
     // MYTRACE(ACE_TEXT("Queued %d msec at %u\n"), (cb_count * cb_msec) - remain_msec, now);
     m_last_flush_time = now - ((cb_count * cb_msec) + remain_msec);
 }
@@ -333,6 +344,28 @@ bool AudioMuxer::CanMuxUserAudio()
         ii++;
     }
     return m_audio_queue.size();
+}
+
+void AudioMuxer::RemoveEmptyMuxUsers()
+{
+    wguard_t g(m_mutex);
+
+    // get rid of users who haven't supplied data in time for
+    // flush
+    for (auto i = m_audio_queue.begin();i != m_audio_queue.end();)
+    {
+        if (i->second->is_empty())
+        {
+            MYTRACE(ACE_TEXT("AudioMuxer removed empty audio queue for #%d\n"), i->first);
+            i = m_audio_queue.erase(i);
+        }
+        else
+        {
+            MYTRACE(ACE_TEXT("AudioMuxer still has audio queue for #%d. Items: %d\n"),
+                    i->first, int(i->second->message_count()));
+            ++i;
+        }
+    }
 }
 
 bool AudioMuxer::MuxUserAudio()
@@ -357,16 +390,16 @@ bool AudioMuxer::MuxUserAudio()
             user_queued_audio_t::iterator ui = m_user_queue.find(ii->first);
             if(ui != m_user_queue.end())
             {
-                TTASSERT(aud->sample_no >= ui->second);
-                if(aud->sample_no > ui->second + SAMPLES)
+                TTASSERT(W32_GEQ(aud->sample_no, ui->second));
+                if (W32_GT(aud->sample_no, ui->second + SAMPLES))
                 {
-                    MYTRACE(ACE_TEXT("Missing audio block from #%d. Got %u, expected %u\n"), 
+                    MYTRACE(ACE_TEXT("Missing audio block from #%d. Got %u, expected %u\n"),
                             ii->first, aud->sample_no, ui->second + SAMPLES);
                     m_user_queue[ii->first] = ui->second + SAMPLES;
                     ii++;
                     continue; //skip it
                 }
-                else if(aud->sample_no < ui->second + SAMPLES)
+                else if (W32_LT(aud->sample_no, ui->second + SAMPLES))
                 {
                     MYTRACE(ACE_TEXT("Got delayed audio block from #%d. Contains %u, expected %u. Dropping user.\n"),
                             ii->first, aud->sample_no, ui->second + SAMPLES);
@@ -424,7 +457,7 @@ bool AudioMuxer::MuxUserAudio()
     else
     {
         AudioMuxBlock* aud = reinterpret_cast<AudioMuxBlock*>(audio_blocks[0]->rd_ptr());
-        TTASSERT((int)m_muxed_audio.size() == 
+        TTASSERT((int)m_muxed_audio.size() ==
                  GetAudioCodecCbSamples(m_codec) * GetAudioCodecChannels(m_codec));
         TTASSERT(aud->audio);
         m_muxed_audio.assign(aud->audio, aud->audio+m_muxed_audio.size());
@@ -467,7 +500,7 @@ void AudioMuxer::WriteAudioToFile(int cb_samples)
     int samplerate = GetAudioCodecSampleRate(m_codec);
     TTASSERT(cb_samples == GetAudioCodecFramesPerPacket(m_codec)*framesize);
 #if ENABLE_SPEEXFILE
-    if(m_speexfile.get() && framesize)
+    if(m_speexfile && framesize)
     {
         int ret = 0;
         for(int i=0;i<cb_samples/framesize && ret >= 0;i++)
@@ -478,7 +511,7 @@ void AudioMuxer::WriteAudioToFile(int cb_samples)
 #endif
 
 #if defined(ENABLE_OPUSFILE)
-    if(m_opusfile.get() && framesize)
+    if(m_opusfile && framesize)
     {
         int ret = 0;
         for(int i=0;i<cb_samples/framesize && ret >= 0;i++)
@@ -498,35 +531,44 @@ void AudioMuxer::WriteAudioToFile(int cb_samples)
         m_wavefile->AppendSamples(&m_muxed_audio[0], cb_samples);
 }
 
-bool AudioMuxer::SetupFileEncode(const ACE_TString& filename, 
+bool AudioMuxer::SetupFileEncode(const ACE_TString& filename,
                                  const teamtalk::AudioCodec& codec)
 {
     int bitrate = 0, maxbitrate = 0;
     bool dtx = false;
     switch(codec.codec)
     {
-#if ENABLE_SPEEXFILE
     case CODEC_SPEEX_VBR :
         bitrate = codec.speex_vbr.bitrate;
         maxbitrate = codec.speex_vbr.max_bitrate;
         dtx = codec.speex_vbr.dtx;
     case CODEC_SPEEX :
+#if ENABLE_SPEEXFILE
         m_speexfile.reset(new SpeexEncFile());
-        return m_speexfile->Open(filename,
-                                 GetSpeexBandMode(codec),
-                                 DEFAULT_SPEEX_COMPLEXITY,
-                                 (float)GetSpeexQuality(codec),
-                                 bitrate, maxbitrate, dtx);
+        if (m_speexfile->Open(filename,
+                              GetSpeexBandMode(codec),
+                              DEFAULT_SPEEX_COMPLEXITY,
+                              (float)GetSpeexQuality(codec),
+                              bitrate, maxbitrate, dtx))
+            return true;
+        else
+            m_speexfile.reset();
 #endif
+        break;
     case CODEC_OPUS :
 #if defined(ENABLE_OPUSFILE)
         m_opusfile.reset(new OpusEncFile());
-        return m_opusfile->Open(filename, GetAudioCodecChannels(codec),
-                                GetAudioCodecSampleRate(codec),
-                                GetAudioCodecFrameSize(m_codec),
-                                codec.opus.application);
+        if (m_opusfile->Open(filename, GetAudioCodecChannels(codec),
+                             GetAudioCodecSampleRate(codec),
+                             GetAudioCodecFrameSize(m_codec),
+                             codec.opus.application))
+            return true;
+        else
+            m_opusfile.reset();
 #endif
+        break;
     default :
-        return false;
+        break;
     }
+    return false;
 }
