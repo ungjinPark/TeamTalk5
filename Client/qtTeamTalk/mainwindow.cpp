@@ -403,6 +403,8 @@ MainWindow::MainWindow(const QString& cfgfile)
             SLOT(slotUsersAdvancedDesktopAllowed(bool)));
     connect(ui.actionAllowMediaFileTransmission, SIGNAL(triggered(bool)),
             SLOT(slotUsersAdvancedMediaFileAllowed(bool)));
+    connect(ui.actionRelayVoiceStream, &QAction::triggered,
+            this, &MainWindow::slotUsersAdvancedRelayUserVoice);
     /* End - Users menu */
 
     /* Begin - Channels menu */
@@ -943,9 +945,6 @@ void MainWindow::processTTMessage(const TTMessage& msg)
             TT_SetUserMediaStorageDir(ttInst, msg.user.nUserID, _W(audiofolder), nullptr, aff);
 
         updateUserSubscription(msg.user.nUserID);
-
-        if (msg.user.nUserID != TT_GetMyUserID(ttInst))
-            TT_EnableAudioBlockEvent(ttInst, msg.user.nUserID,  STREAMTYPE_VOICE, true);
     }
     break;
     case CLIENTEVENT_CMD_USER_LOGGEDOUT :
@@ -966,6 +965,11 @@ void MainWindow::processTTMessage(const TTMessage& msg)
         if(msg.user.nUserID == TT_GetMyUserID(ttInst))
             processMyselfLeft(msg.nSource);
         emit(userLeft(msg.nSource, msg.user));
+        if (m_relayvoice_userid == msg.user.nUserID)
+        {
+            TT_EnableAudioBlockEvent(ttInst, m_relayvoice_userid, STREAMTYPE_VOICE, false);
+            m_relayvoice_userid = 0;
+        }
         update_ui = true;
         break;
     case CLIENTEVENT_CMD_USER_UPDATE :
@@ -1331,7 +1335,11 @@ void MainWindow::processTTMessage(const TTMessage& msg)
                 << "index" << block->uSampleIndex 
                 << "samples" << block->nSamples
                 << "avg" << mean;
-            TT_InsertAudioBlock(ttInst, block);
+            Q_ASSERT(m_relayvoice_userid == msg.nSource);
+            if (m_relayvoice_userid == msg.nSource)
+            {
+                TT_InsertAudioBlock(ttInst, block);
+            }
             TT_ReleaseUserAudioBlock(ttInst, block);
         }
     }
@@ -1605,6 +1613,9 @@ void MainWindow::Disconnect()
 
     ZERO_STRUCT(m_srvprop);
     ZERO_STRUCT(m_mychannel);
+    if (m_relayvoice_userid)
+        TT_EnableAudioBlockEvent(ttInst, m_relayvoice_userid, STREAMTYPE_VOICE, false);
+    m_relayvoice_userid = 0;
 
     m_useraccounts.clear();
     m_bannedusers.clear();
@@ -3823,6 +3834,23 @@ void MainWindow::slotUsersAdvancedMediaFileAllowed(bool checked/*=false*/)
     }
 }
 
+void MainWindow::slotUsersAdvancedRelayUserVoice(bool checked/*=false*/)
+{
+    int userid = ui.channelsWidget->selectedUser();
+    if (m_relayvoice_userid)
+        TT_EnableAudioBlockEvent(ttInst, m_relayvoice_userid, STREAMTYPE_VOICE, false);
+
+    if (userid > 0 && checked)
+    {
+        m_relayvoice_userid = userid;
+        TT_EnableAudioBlockEvent(ttInst, userid, STREAMTYPE_VOICE, true);
+    }
+    else
+    {
+        m_relayvoice_userid = 0;
+    }
+}
+
 void MainWindow::slotUsersStoreAudioToDisk(bool/* checked*/)
 {
     quint32 old_mode = m_audiostorage_mode;
@@ -4445,6 +4473,8 @@ void MainWindow::slotUpdateUI()
     ui.actionLowerMediaFileVolume->setEnabled(userid>0 && user.nVolumeMediaFile > SOUND_VOLUME_MIN);
     ui.actionStoreForMove->setEnabled(userid>0 && (userrights & USERRIGHT_MOVE_USERS));
     ui.actionMoveUser->setEnabled(m_moveusers.size() && (userrights & USERRIGHT_MOVE_USERS));
+    ui.actionRelayVoiceStream->setEnabled(userid > 0);
+    ui.actionRelayVoiceStream->setChecked(userid == m_relayvoice_userid);
 
     //ui.actionMuteAll->setEnabled(statemask & CLIENT_SOUND_READY);
     ui.actionMuteAll->setChecked(statemask & CLIENT_SNDOUTPUT_MUTE);

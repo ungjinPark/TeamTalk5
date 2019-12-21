@@ -215,6 +215,8 @@ private:
     QPoint m_lastCursorPos;
     //list of desktop access users
     QVector<DesktopAccessEntry> m_desktopaccess_entries;
+    // user being relayed
+    int m_relayvoice_userid = 0;
 
     //current command reply processing
     void commandProcessing(int cmdid, bool complete);
@@ -231,7 +233,6 @@ private:
     void processMyselfJoined(int channelid);
     void processMyselfLeft(int channelid);
     TextMessageDlg* getTextMessageDlg(int userid);
-    int getVideoStreamID(int userid) const;
     void killLocalTimer(TimerEvent e);
     bool timerExists(TimerEvent e);
     void updateChannelFiles(int channelid);
@@ -319,6 +320,7 @@ private slots:
     void slotUsersAdvancedVideoAllowed(bool checked=false);
     void slotUsersAdvancedDesktopAllowed(bool checked=false);
     void slotUsersAdvancedMediaFileAllowed(bool checked=false);
+    void slotUsersAdvancedRelayUserVoice(bool checked=false);
     void slotUsersMuteVoiceAll(bool checked=false);
     void slotUsersStoreAudioToDisk(bool checked=false);
 
