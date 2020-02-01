@@ -1467,7 +1467,7 @@ BEGIN
     "B",            ID_SERVER_LISTBANNEDUSERS, VIRTKEY, SHIFT, CONTROL, NOINVERT
     "B",            ID_CHANNELS_BANNEDUSERSINCHANNEL, VIRTKEY, SHIFT, CONTROL, ALT, NOINVERT
     "D",            ID_ME_ENABLEDESKTOPSHARING, VIRTKEY, SHIFT, CONTROL, NOINVERT
-    "E",            ID_USERS_MESSAGES,      VIRTKEY, CONTROL, NOINVERT
+    "E",            ID_USERS_PRIVMSG,      VIRTKEY, CONTROL, NOINVERT
     "E",            ID_ADVANCED_ALLOWDESKTOPTRANSMISSION, VIRTKEY, CONTROL, ALT, NOINVERT
     "E",            ID_ADVANCED_ALLOWALLDESKTOPTRANSMISSION, VIRTKEY, SHIFT, CONTROL, ALT, NOINVERT
     "G",            ID_USERINFO_SPEAKUSERINFO, VIRTKEY, CONTROL, NOINVERT
@@ -2011,7 +2011,7 @@ BEGIN
     ID_USERS_VIEWINFO       "View information about the selected user"
     ID_CHANNELS_CREATECHANNEL "Create a sub channel inyour current channel"
     ID_CHANNELS_JOINCHANNEL "Join the selected channel"
-    ID_USERS_MESSAGES       "Send message to selected user"
+    ID_USERS_PRIVMSG       "Send message to selected user"
     ID_CHANNELS             "&Channels"
 END
 
