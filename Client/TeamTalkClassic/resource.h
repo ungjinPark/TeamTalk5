@@ -228,6 +228,10 @@
 #define IDS_PLAY                        323
 #define IDD_DIALOG_TTAUDIOPREPROCESSOR  324
 #define IDD_DIALOG_SPEEXDSP             325
+#define IDS_LIVEURLOPEN                 326
+#define IDD_DIALOG_SENDLIVECONTENT      327
+#define IDS_LIVEDOWNLOAD                328
+#define IDS_LIVEDOWNLOADREQ             329
 #define MAX_STRING_LENGTH               511
 #define MAX_USERS                       1000
 #define IDC_SLIDER_VOICEACT             1001
@@ -722,6 +726,13 @@
 #define IDC_CHECK_MUTELEFT              1591
 #define IDC_CHECK_MUTERIGHT             1592
 #define IDC_CHECK_REPEAT                1593
+#define IDC_RADIO_URL                   1594
+#define IDC_RADIO_DOWNLOAD              1595
+#define IDC_EDIT_URL                    1596
+#define IDC_COMBO_FILES                 1597
+#define IDC_TREE_USERS                  1598
+#define IDC_STATIC_LIVECONTENTGRP       1599
+#define IDC_STATIC_RECIPIENTSGRP        1600
 #define ID_HELP_WHATISMYIP              32791
 #define ID_USERS_OP                     32798
 #define ID_CHANNELS_VIEWCHANNELMESSAGES 32801
@@ -830,15 +841,18 @@
 #define ID_CHANNELS_BANNEDUSERSINCHANNEL 32952
 #define ID_CLIENT_NEWCLIENTINSTANCE     32953
 #define ID_POPUP_STOREFORMOVE           32954
+#define ID_USERS_PRIVMSG                32955
+#define ID_MESSAGES_SENDLIVECONTENT     32956
+#define ID_MESSAGES_OPENLIVECONTENT     32957
 #define TT_MAX_ID                       0xFFFF
 
 // Next default values for new objects
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        323
-#define _APS_NEXT_COMMAND_VALUE         32955
-#define _APS_NEXT_CONTROL_VALUE         1594
-#define _APS_NEXT_SYMED_VALUE           326
+#define _APS_NEXT_RESOURCE_VALUE        330
+#define _APS_NEXT_COMMAND_VALUE         32958
+#define _APS_NEXT_CONTROL_VALUE         1601
+#define _APS_NEXT_SYMED_VALUE           330
 #endif
 #endif

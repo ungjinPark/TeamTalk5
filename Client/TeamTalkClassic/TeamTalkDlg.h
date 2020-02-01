@@ -208,6 +208,7 @@ protected:
     //user message session
     typedef std::map<int, CMessageDlg*> mapuserdlg_t;
     mapuserdlg_t m_mUserDlgs;
+    std::vector<TextMessage> m_liveContent;
     typedef std::map<int, CUserVideoDlg*> mapvideodlg_t;
     mapvideodlg_t m_videodlgs;
     std::set<int> m_videoignore;
@@ -516,5 +517,9 @@ public:
     afx_msg void OnUpdateChannelsBannedusersinchannel(CCmdUI *pCmdUI);
     afx_msg void OnChannelsBannedusersinchannel();
     afx_msg void OnClientNewclientinstance();
+    afx_msg void OnUpdateMessagesSendlivecontent(CCmdUI *pCmdUI);
+    afx_msg void OnMessagesSendlivecontent();
+    afx_msg void OnUpdateMessagesOpenlivecontent(CCmdUI *pCmdUI);
+    afx_msg void OnMessagesOpenlivecontent();
 };
 
