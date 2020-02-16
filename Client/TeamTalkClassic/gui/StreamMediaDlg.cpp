@@ -43,6 +43,7 @@ CStreamMediaDlg::CStreamMediaDlg(teamtalk::ClientXML& xmlSettings, CWnd* pParent
 	: CDialog(CStreamMediaDlg::IDD, pParent)
     , m_xmlSettings(xmlSettings)
     , m_nVidCodecBitrate(DEFAULT_WEBM_VP8_BITRATE)
+    , m_mfi()
 {
 
 }
@@ -55,11 +56,10 @@ CStreamMediaDlg::~CStreamMediaDlg()
 
 void CStreamMediaDlg::ProcessTTMessage(const TTMessage& msg)
 {
-    BOOL bFinished = false;
+    BOOL bFinished = FALSE;
     switch (msg.nClientEvent)
     {
-    case CLIENTEVENT_STREAM_MEDIAFILE :
-        break;
+    case CLIENTEVENT_STREAM_MEDIAFILE:
     case CLIENTEVENT_LOCAL_MEDIAFILE :
         m_mfi = msg.mediafileinfo;
         switch (m_mfi.nStatus)
@@ -69,16 +69,21 @@ void CStreamMediaDlg::ProcessTTMessage(const TTMessage& msg)
             break;
         case MFS_ERROR:
         case MFS_ABORTED :
-            TT_StopLocalPlayback(ttInst, m_nPlaybackID);
-            m_nPlaybackID = 0;
+            if (msg.nClientEvent == CLIENTEVENT_LOCAL_MEDIAFILE)
+            {
+                TT_StopLocalPlayback(ttInst, m_nPlaybackID);
+                m_nPlaybackID = 0;
+            }
             break;
         case MFS_FINISHED:
-            m_nPlaybackID = 0;
-            bFinished = TRUE;
+            if(msg.nClientEvent == CLIENTEVENT_LOCAL_MEDIAFILE)
+            {
+                m_nPlaybackID = 0;
+                bFinished = TRUE;
+            }
         case MFS_STARTED:
         case MFS_PLAYING:
         {
-
             double percent = m_mfi.uElapsedMSec / double(m_mfi.uDurationMSec);
             m_wndOffset.SetPos(int(m_wndOffset.GetRangeMax() * percent));
 
@@ -174,6 +179,8 @@ BOOL CStreamMediaDlg::OnInitDialog()
 
 void CStreamMediaDlg::UpdateMediaFile(const CString szFileName)
 {
+    m_mfi = {};
+
     TT_GetMediaFileInfo(szFileName, &m_mfi);
     BOOL audio = m_mfi.audioFmt.nAudioFmt != AFF_NONE;
     BOOL video = m_mfi.videoFmt.picFourCC != FOURCC_NONE;
@@ -221,12 +228,28 @@ void CStreamMediaDlg::UpdateControls()
         m_wndStartPlayback.EnableWindow(TRUE);
         break;
     case MFS_PLAYING :
-        m_wndStopPlayback.EnableWindow(TRUE);
-        m_wndStartPlayback.EnableWindow(FALSE);
+        if (m_nPlaybackID)
+        {
+            m_wndStopPlayback.EnableWindow(TRUE);
+            m_wndStartPlayback.EnableWindow(FALSE);
+        }
+        else
+        {
+            m_wndStopPlayback.EnableWindow(FALSE);
+            m_wndStartPlayback.EnableWindow(FALSE);
+        }
         break;
     case MFS_PAUSED :
-        m_wndStopPlayback.EnableWindow(TRUE);
-        m_wndStartPlayback.EnableWindow(TRUE);
+        if(m_nPlaybackID)
+        {
+            m_wndStopPlayback.EnableWindow(TRUE);
+            m_wndStartPlayback.EnableWindow(TRUE);
+        }
+        else
+        {
+            m_wndStopPlayback.EnableWindow(FALSE);
+            m_wndStartPlayback.EnableWindow(FALSE);
+        }
         break;
     }
 
@@ -372,7 +395,7 @@ void CStreamMediaDlg::OnNMCustomdrawSliderOffset(NMHDR *pNMHDR, LRESULT *pResult
     // TODO: Add your control notification handler code here
     *pResult = 0;
 
-    if(m_nPlaybackID)
+    if (m_nPlaybackID)
         return;
 
     double percent = m_wndOffset.GetPos() / double(m_wndOffset.GetRangeMax());

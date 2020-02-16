@@ -87,4 +87,4 @@ public:
     afx_msg void OnCbnSelchangeComboAudiopreprocessor();
     afx_msg void OnCbnSelchangeComboFilename();
     CButton m_wndRepeat;
-};
+ };

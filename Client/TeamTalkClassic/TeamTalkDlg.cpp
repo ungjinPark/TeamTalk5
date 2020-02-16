@@ -930,11 +930,13 @@ LRESULT CTeamTalkDlg::OnClientEvent(WPARAM wParam, LPARAM lParam)
         case CLIENTEVENT_DESKTOPWINDOW_TRANSFER :
             OnDesktopWindowTransfer(msg);
             break;
+        case CLIENTEVENT_INTERNAL_ERROR:
+            OnInternalError(msg);
+            break;
         case CLIENTEVENT_STREAM_MEDIAFILE :
             OnStreamMediaFile(msg);
-            break;
-        case CLIENTEVENT_INTERNAL_ERROR :
-            OnInternalError(msg);
+            if(m_pStreamMediaDlg)
+                m_pStreamMediaDlg->ProcessTTMessage(msg);
             break;
         case CLIENTEVENT_LOCAL_MEDIAFILE :
             if (m_pStreamMediaDlg)
@@ -5562,27 +5564,28 @@ void CTeamTalkDlg::OnUpdateChannelsStreamMediaFileToChannel(CCmdUI *pCmdUI)
 
 void CTeamTalkDlg::OnChannelsStreamMediaFileToChannel()
 {
-    ClientFlags flags = TT_GetFlags(ttInst);
-    if(flags & (CLIENT_STREAM_AUDIO | CLIENT_STREAM_VIDEO))
-        StopMediaStream();
-    else
+    m_pStreamMediaDlg.reset(new CStreamMediaDlg(m_xmlSettings, this));
+    auto files = m_xmlSettings.GetLastMediaFiles();
+    for (auto a : files)
+        m_pStreamMediaDlg->m_fileList.AddTail(STR_UTF8(a));
+
+    switch (m_pStreamMediaDlg->DoModal())
     {
-        m_pStreamMediaDlg.reset(new CStreamMediaDlg(m_xmlSettings, this));
-        auto files = m_xmlSettings.GetLastMediaFiles();
-        for (auto a : files)
-            m_pStreamMediaDlg->m_fileList.AddTail(STR_UTF8(a));
+    case IDOK :
+        files.clear();
+        for(POSITION pos=m_pStreamMediaDlg->m_fileList.GetHeadPosition();pos != nullptr;)
+            files.push_back(STR_UTF8(m_pStreamMediaDlg->m_fileList.GetNext(pos)));
+        m_xmlSettings.SetLastMediaFiles(files);
 
-        if (m_pStreamMediaDlg->DoModal() == IDOK)
-        {
-            files.clear();
-            for(POSITION pos=m_pStreamMediaDlg->m_fileList.GetHeadPosition();pos != nullptr;)
-                files.push_back(STR_UTF8(m_pStreamMediaDlg->m_fileList.GetNext(pos)));
-            m_xmlSettings.SetLastMediaFiles(files);
-
-            StartMediaStream();
-        }
-        m_pStreamMediaDlg.reset();
+        StartMediaStream();
+        break;
+    default :
+        ClientFlags flags = TT_GetFlags(ttInst);
+        if(flags & (CLIENT_STREAM_AUDIO | CLIENT_STREAM_VIDEO))
+            StopMediaStream();
+        break;
     }
+    m_pStreamMediaDlg.reset();
 }
 
 void CTeamTalkDlg::OnUpdateServerServerproperties(CCmdUI *pCmdUI)
@@ -5807,7 +5810,8 @@ void CTeamTalkDlg::OnUsersStoreconversationstodisk()
     dlg.m_szChanLogDir = STR_UTF8(m_xmlSettings.GetChanTextLogStorage());
     dlg.m_szUserTxtDir = STR_UTF8(m_xmlSettings.GetUserTextLogStorage());
 
-    switch (dlg.DoModal())
+    auto result = dlg.DoModal();
+    switch (result)
     {
     case IDOK:
         m_xmlSettings.SetAudioLogStorage(STR_UTF8(dlg.m_szAudioDir));
