@@ -29,6 +29,14 @@ public class WebRTCAudioPreprocessor {
         public boolean bEnable;
     }
 
+    public class GainController1 {
+        public boolean bEnable = false;
+        public int nTargetLevelDBFS = 3;
+    }
+
+    public GainController1 gaincontroller1 = new GainController1();
+    
+
     public EchoCanceller echocanceller = new EchoCanceller();
     
     public class GainController2 {
