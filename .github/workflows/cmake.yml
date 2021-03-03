@@ -9,6 +9,8 @@ env:
   VIDEODEVICEID: None
   OPUSTOOLS: 0
   VERBOSE: 0
+  VIDEOFILE: ${{runner.workspace}}/TeamTalk5/Library/TeamTalkLib/test/testdata/Video/MOV03830.MPG
+  AUDIOFILE: ${{runner.workspace}}/TeamTalk5/Library/TeamTalkLib/test/testdata/Opus/giana.ogg
 
 jobs:
   build:
