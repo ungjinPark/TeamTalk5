@@ -1,0 +1,23 @@
+name: Android
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      githash: $GITHUB_SHA
+
+    steps:
+    - uses: actions/download-artifact@v2
+      with:
+        name: android_artifacts
+        path: ${{runner.workspace}}/TeamTalk5/Library/TeamTalkLib/toolchain
+
+    - uses: actions/checkout@v2
+
+    - name: See content
+      working-directory: ${{runner.workspace}}/TeamTalk5
+      run: |
+        ls Library/TeamTalkLib/toolchain
